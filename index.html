@@ -1,1 +1,172 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>APEX Tournament Tool</title>
+<style>
+body { background:#0f172a; color:#e5e7eb; font-family:sans-serif; }
+h1,h2 { color:#22c55e; }
+table { border-collapse: collapse; margin-bottom:20px; width:100%; }
+td, th { border:1px solid #334155; padding:6px; text-align:center; }
+input { width:80px; background:#020617; color:white; border:1px solid #334155; }
+button { margin:5px; padding:6px 10px; }
+.section { margin-bottom:30px; }
+</style>
+</head>
+<body>
 
+<h1>APEX 大会運営ツール</h1>
+
+<div class="section">
+<h2>① ルール設定</h2>
+キルPt <input id="killPt" type="number" value="1"><br>
+<div id="placement"></div>
+<button onclick="saveRules()">保存</button>
+</div>
+
+<div class="section">
+<h2>② チーム登録</h2>
+<button onclick="addTeam()">追加</button>
+<table id="teams"></table>
+</div>
+
+<div class="section">
+<h2>③ 試合結果</h2>
+<button onclick="addMatch()">試合追加</button>
+<div id="matches"></div>
+</div>
+
+<div class="section">
+<h2>④ 総合ランキング</h2>
+<table id="ranking"></table>
+</div>
+
+<script>
+let state = JSON.parse(localStorage.getItem("apex")) || {
+  rules: { killPt:1, placement:{} },
+  teams: [],
+  matches: []
+};
+
+for(let i=1;i<=20;i++){
+  if(!state.rules.placement[i]) state.rules.placement[i]=0;
+}
+
+const placementDiv = document.getElementById("placement");
+for(let i=1;i<=20;i++){
+  placementDiv.innerHTML += `${i}位 <input id="p${i}" value="${state.rules.placement[i]}"><br>`;
+}
+
+function saveRules(){
+  state.rules.killPt = parseInt(document.getElementById("killPt").value);
+  for(let i=1;i<=20;i++){
+    state.rules.placement[i] = parseInt(document.getElementById(`p${i}`).value)||0;
+  }
+  save();
+}
+
+function addTeam(){
+  state.teams.push({ name:"チーム", members:["","",""] });
+  render();
+}
+
+function renderTeams(){
+  const t = document.getElementById("teams");
+  t.innerHTML = "<tr><th>チーム</th><th>メンバー</th></tr>";
+
+  state.teams.forEach((team,i)=>{
+    t.innerHTML += `
+      <tr>
+        <td><input value="${team.name}" onchange="state.teams[${i}].name=this.value;save()"></td>
+        <td>
+          <input value="${team.members[0]}" onchange="state.teams[${i}].members[0]=this.value;save()">
+          <input value="${team.members[1]}" onchange="state.teams[${i}].members[1]=this.value;save()">
+          <input value="${team.members[2]}" onchange="state.teams[${i}].members[2]=this.value;save()">
+        </td>
+      </tr>
+    `;
+  });
+}
+
+function addMatch(){
+  state.matches.push([]);
+  render();
+}
+
+function renderMatches(){
+  const div = document.getElementById("matches");
+  div.innerHTML = "";
+
+  state.matches.forEach((match,mi)=>{
+    let html = `<h3>試合 ${mi+1}</h3><table><tr><th>チーム</th><th>順位</th><th>キル</th></tr>`;
+
+    state.teams.forEach((team,ti)=>{
+      const data = match[ti] || {rank:"", kills:0};
+
+      html += `
+      <tr>
+        <td>${team.name}</td>
+        <td><input value="${data.rank}" onchange="setMatch(${mi},${ti},'rank',this.value)"></td>
+        <td><input value="${data.kills}" onchange="setMatch(${mi},${ti},'kills',this.value)"></td>
+      </tr>`;
+    });
+
+    html += "</table>";
+    div.innerHTML += html;
+  });
+}
+
+function setMatch(mi,ti,key,val){
+  if(!state.matches[mi][ti]) state.matches[mi][ti]={};
+  state.matches[mi][ti][key] = parseInt(val);
+  save();
+  renderRanking();
+}
+
+function calcTotal(ti){
+  let total=0;
+
+  state.matches.forEach(match=>{
+    const d = match[ti];
+    if(!d) return;
+
+    total += (state.rules.placement[d.rank]||0);
+    total += (d.kills||0) * state.rules.killPt;
+  });
+
+  return total;
+}
+
+function renderRanking(){
+  const r = document.getElementById("ranking");
+
+  let arr = state.teams.map((t,i)=>({
+    name:t.name,
+    pt:calcTotal(i)
+  }));
+
+  arr.sort((a,b)=>b.pt-a.pt);
+
+  r.innerHTML = "<tr><th>順位</th><th>チーム</th><th>Pt</th></tr>";
+
+  arr.forEach((t,i)=>{
+    r.innerHTML += `<tr><td>${i+1}</td><td>${t.name}</td><td>${t.pt}</td></tr>`;
+  });
+}
+
+function save(){
+  localStorage.setItem("apex", JSON.stringify(state));
+  renderRanking();
+}
+
+function render(){
+  renderTeams();
+  renderMatches();
+  renderRanking();
+}
+
+render();
+</script>
+
+</body>
+</html>
