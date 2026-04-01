@@ -2,171 +2,196 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>APEX Tournament Tool</title>
+<title>APEXカスタム ポイント集計ツール</title>
 <style>
-body { background:#0f172a; color:#e5e7eb; font-family:sans-serif; }
-h1,h2 { color:#22c55e; }
-table { border-collapse: collapse; margin-bottom:20px; width:100%; }
-td, th { border:1px solid #334155; padding:6px; text-align:center; }
-input { width:80px; background:#020617; color:white; border:1px solid #334155; }
-button { margin:5px; padding:6px 10px; }
-.section { margin-bottom:30px; }
+body{ margin:0; background:#0b132b; color:#fff; font-family:Arial;}
+.container{ display:flex; height:100vh;}
+.left{ width:35%; padding:20px; background:#111a33; overflow:auto;}
+.right{ width:65%; padding:20px; overflow:auto;}
+h2{ border-left:5px solid #00ff9f; padding-left:10px;}
+input{ margin:5px; background:#000; color:#0f0; border:2px solid #00ff9f; width:70px; height:35px; text-align:center;}
+.name{ width:120px;}
+button{ margin:5px; padding:8px 12px; background:#00ff9f; border:none; font-weight:bold; cursor:pointer; border-radius:6px;}
+.team{ background:#162447; padding:10px; margin:10px 0; border-radius:8px;}
+.ranking-box{ margin-top:10px; background: linear-gradient(135deg,#0f2027,#203a43,#2c5364); padding:20px; border-radius:10px; font-size:20px;}
 </style>
 </head>
 <body>
 
-<h1>APEX 大会運営ツール</h1>
-
-<div class="section">
-<h2>① ルール設定</h2>
-キルPt <input id="killPt" type="number" value="1"><br>
+<div class="container">
+<div class="left">
+<h2>ルール設定</h2>
+キルPt <input id="killPoint" value="1">
+キル上限 <input id="killCap" value="10">
 <div id="placement"></div>
-<button onclick="saveRules()">保存</button>
+
+<h2>試合操作</h2>
+<div style="display:flex; gap:10px; margin-bottom:10px;">
+<button onclick="showPrevMatch()">前の試合を確認</button>
+<button onclick="nextMatch()">次の試合を作成</button>
+<button onclick="resetAll()">リセット</button>
+<button onclick="finalizeRanking()">カスタム終了</button>
 </div>
 
-<div class="section">
-<h2>② チーム登録</h2>
-<button onclick="addTeam()">追加</button>
-<table id="teams"></table>
+<h2>過去の試合結果</h2>
+<div id="matchHistory"></div>
 </div>
 
-<div class="section">
-<h2>③ 試合結果</h2>
-<button onclick="addMatch()">試合追加</button>
-<div id="matches"></div>
+<div class="right">
+<h2>チーム</h2>
+<button onclick="addTeam()">＋チーム追加</button>
+<div id="teams"></div>
+
+<h2>ランキング</h2>
+<button onclick="updateRanking()">更新</button>
+<button onclick="exportImage()">画像出力</button>
+<div id="ranking" class="ranking-box"></div>
+
+<h2>操作ログ</h2>
+<div id="logBox" style="height:200px; overflow:auto; background:#111a33; padding:10px; border-radius:8px; font-size:14px;"></div>
+</div>
 </div>
 
-<div class="section">
-<h2>④ 総合ランキング</h2>
-<table id="ranking"></table>
-</div>
-
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script>
-let state = JSON.parse(localStorage.getItem("apex")) || {
-  rules: { killPt:1, placement:{} },
-  teams: [],
-  matches: []
-};
+// --- 状態管理 ---
+let state = { teams: [], matches: [] };
+let rankingFinalized = false;
 
-for(let i=1;i<=20;i++){
-  if(!state.rules.placement[i]) state.rules.placement[i]=0;
+// --- 初期配置 ---
+function initPlacement(){
+  let leftHtml="", rightHtml="";
+  for(let i=1;i<=10;i++){ leftHtml += `${i}位 <input id="p${i}" value="0"><br>`;}
+  for(let i=11;i<=20;i++){ rightHtml += `${i}位 <input id="p${i}" value="0"><br>`;}
+  document.getElementById("placement").innerHTML = `<div style="display:flex; gap:20px;"><div style="flex:1;">${leftHtml}</div><div style="flex:1;">${rightHtml}</div></div>`;
 }
+initPlacement();
 
-const placementDiv = document.getElementById("placement");
-for(let i=1;i<=20;i++){
-  placementDiv.innerHTML += `${i}位 <input id="p${i}" value="${state.rules.placement[i]}"><br>`;
-}
-
-function saveRules(){
-  state.rules.killPt = parseInt(document.getElementById("killPt").value);
-  for(let i=1;i<=20;i++){
-    state.rules.placement[i] = parseInt(document.getElementById(`p${i}`).value)||0;
-  }
-  save();
-}
-
-function addTeam(){
-  state.teams.push({ name:"チーム", members:["","",""] });
-  render();
-}
-
-function renderTeams(){
-  const t = document.getElementById("teams");
-  t.innerHTML = "<tr><th>チーム</th><th>メンバー</th></tr>";
-
-  state.teams.forEach((team,i)=>{
-    t.innerHTML += `
-      <tr>
-        <td><input value="${team.name}" onchange="state.teams[${i}].name=this.value;save()"></td>
-        <td>
-          <input value="${team.members[0]}" onchange="state.teams[${i}].members[0]=this.value;save()">
-          <input value="${team.members[1]}" onchange="state.teams[${i}].members[1]=this.value;save()">
-          <input value="${team.members[2]}" onchange="state.teams[${i}].members[2]=this.value;save()">
-        </td>
-      </tr>
-    `;
+// --- 入力同期 ---
+function syncInputs(){
+  const teamEls = document.querySelectorAll(".team");
+  teamEls.forEach((el,i)=>{
+    state.teams[i].name = el.querySelector('[data-type="name"]').value;
+    state.teams[i].m1   = el.querySelector('[data-type="m1"]').value;
+    state.teams[i].m2   = el.querySelector('[data-type="m2"]').value;
+    state.teams[i].m3   = el.querySelector('[data-type="m3"]').value;
+    state.teams[i].kill = Number(el.querySelector('[data-type="kill"]').value);
+    state.teams[i].rank = Number(el.querySelector('[data-type="rank"]').value);
   });
 }
 
-function addMatch(){
-  state.matches.push([]);
-  render();
+// --- チーム管理 ---
+function addTeam(index){
+  syncInputs();
+  const newTeam = { name:"", m1:"", m2:"", m3:"", kill:0, rank:1, total:0 };
+  if(index!==undefined){ state.teams.splice(index+1,0,newTeam); logAction(`チームを${index+2}番目に追加`);}
+  else{ state.teams.push(newTeam); logAction("チームを末尾に追加"); }
+  render(); saveData();
 }
-
-function renderMatches(){
-  const div = document.getElementById("matches");
-  div.innerHTML = "";
-
-  state.matches.forEach((match,mi)=>{
-    let html = `<h3>試合 ${mi+1}</h3><table><tr><th>チーム</th><th>順位</th><th>キル</th></tr>`;
-
-    state.teams.forEach((team,ti)=>{
-      const data = match[ti] || {rank:"", kills:0};
-
-      html += `
-      <tr>
-        <td>${team.name}</td>
-        <td><input value="${data.rank}" onchange="setMatch(${mi},${ti},'rank',this.value)"></td>
-        <td><input value="${data.kills}" onchange="setMatch(${mi},${ti},'kills',this.value)"></td>
-      </tr>`;
-    });
-
-    html += "</table>";
-    div.innerHTML += html;
-  });
-}
-
-function setMatch(mi,ti,key,val){
-  if(!state.matches[mi][ti]) state.matches[mi][ti]={};
-  state.matches[mi][ti][key] = parseInt(val);
-  save();
-  renderRanking();
-}
-
-function calcTotal(ti){
-  let total=0;
-
-  state.matches.forEach(match=>{
-    const d = match[ti];
-    if(!d) return;
-
-    total += (state.rules.placement[d.rank]||0);
-    total += (d.kills||0) * state.rules.killPt;
-  });
-
-  return total;
-}
-
-function renderRanking(){
-  const r = document.getElementById("ranking");
-
-  let arr = state.teams.map((t,i)=>({
-    name:t.name,
-    pt:calcTotal(i)
-  }));
-
-  arr.sort((a,b)=>b.pt-a.pt);
-
-  r.innerHTML = "<tr><th>順位</th><th>チーム</th><th>Pt</th></tr>";
-
-  arr.forEach((t,i)=>{
-    r.innerHTML += `<tr><td>${i+1}</td><td>${t.name}</td><td>${t.pt}</td></tr>`;
-  });
-}
-
-function save(){
-  localStorage.setItem("apex", JSON.stringify(state));
-  renderRanking();
-}
-
+function removeTeam(i){ syncInputs(); state.teams.splice(i,1); render(); logAction(`チーム${i+1}を削除`); saveData(); }
 function render(){
-  renderTeams();
-  renderMatches();
-  renderRanking();
+  const el = document.getElementById("teams"); el.innerHTML="";
+  state.teams.forEach((t,i)=>{
+    el.innerHTML += `<div class="team">
+      チーム名 <input class="name" data-type="name" value="${t.name}"><br>
+      メンバー <input class="name" data-type="m1" value="${t.m1}"> <input class="name" data-type="m2" value="${t.m2}"> <input class="name" data-type="m3" value="${t.m3}"><br>
+      キル <input type="number" data-type="kill" value="${t.kill}"> 順位 <input type="number" data-type="rank" value="${t.rank}"><br>
+      <div><button onclick="addTeam(${i})">＋追加</button> <button onclick="removeTeam(${i})">削除</button></div>
+    </div>`;
+  });
 }
 
-render();
-</script>
+// --- ポイント計算 ---
+function calc(t){
+  let kp = Number(document.getElementById("killPoint").value);
+  let cap = Number(document.getElementById("killCap").value);
+  let kill = Math.min(t.kill,cap)*kp;
+  let place = Number(document.getElementById("p"+t.rank).value);
+  return kill + place;
+}
 
+// --- ランキング ---
+function updateRanking(isTotal=false){
+  syncInputs();
+  let arr;
+  if(rankingFinalized || isTotal){ arr = state.teams.map(t=>({...t, pt:t.total||0})); }
+  else{ arr = state.teams.map(t=>({...t, pt:calc(t)})); }
+  arr.sort((a,b)=>b.pt-a.pt);
+  const el = document.getElementById("ranking"); el.innerHTML="";
+  arr.forEach((t,i)=>{
+    let medal=i==0?"🥇":i==1?"🥈":i==2?"🥉":"";
+    el.innerHTML += `<div style="margin-bottom:10px;"><div>${medal} ${i+1}位 ${t.name} ${t.pt}pt</div>
+      <div style="font-size:14px;color:#aaa;">${t.m1||"-"} / ${t.m2||"-"} / ${t.m3||"-"}</div></div>`;
+  });
+}
+
+// --- 過去試合 ---
+function renderMatchHistory(){
+  const historyEl = document.getElementById("matchHistory"); historyEl.innerHTML="";
+  state.matches.forEach((match,i)=>{
+    let html=`<div style="margin-bottom:5px;">試合${i+1}: `;
+    match.forEach(t=>{ html += `${t.name||"-"}(${t.pt}pt) `; });
+    html += "</div>"; historyEl.innerHTML+=html;
+  });
+}
+function nextMatch(){
+  syncInputs();
+  state.teams.forEach(t=>{ const pt = calc(t); t.total = (t.total||0)+pt; });
+  const matchData = state.teams.map(t=>({ name:t.name, m1:t.m1, m2:t.m2, m3:t.m3, pt:calc(t) }));
+  state.matches.push(matchData);
+  logAction(`試合${state.matches.length}を保存`);
+  renderMatchHistory();
+  state.teams.forEach(t=>{ t.kill=0; t.rank=1; });
+  render(); updateRanking(); saveData();
+}
+function showPrevMatch(){
+  if(state.matches.length===0) return alert("過去試合がありません");
+  const lastMatch = state.matches[state.matches.length-1];
+  const logBox = document.getElementById("logBox");
+  logBox.innerHTML += `<div style="border-top:1px solid #00ff9f; margin-top:5px; padding-top:5px;">直前の試合：</div>`;
+  lastMatch.forEach((t,i)=>{ logBox.innerHTML += `<div>${i+1}位 ${t.name} ${t.pt}pt (${t.m1}/${t.m2}/${t.m3})</div>`; });
+  logBox.scrollTop = logBox.scrollHeight;
+  logAction("直前の試合を確認");
+}
+
+// --- カスタム終了 ---
+function finalizeRanking(){ if(!confirm("カスタムを終了して最終ランキングを確定しますか？")) return;
+  rankingFinalized=true; updateRanking(true); saveData(); logAction("カスタム終了：最終ランキングを確定"); }
+
+// --- リセット ---
+function resetAll(){ if(!confirm("すべてのデータをリセットします。よろしいですか？")) return;
+  state.teams.forEach(t=>{ t.kill=0; t.rank=1; t.total=0; }); state.matches=[]; render(); updateRanking(true); renderMatchHistory(); saveData(); logAction("すべてのデータをリセットしました"); }
+
+// --- ログ ---
+function logAction(msg){ const logBox=document.getElementById("logBox"); const time=new Date().toLocaleTimeString();
+  const entry=document.createElement("div"); entry.textContent=`[${time}] ${msg}`; logBox.appendChild(entry); logBox.scrollTop=logBox.scrollHeight; }
+
+// --- 画像 ---
+function buildImageHTML(arr){ let left="", right="";
+  arr.forEach((t,i)=>{ let color="rgba(255,255,255,0.25)"; if(i==0) color="#FFD70055"; if(i==1) color="#C0C0C055"; if(i==2) color="#CD7F3255";
+    const block=`<div style="background:${color}; border-radius:15px; padding:12px; margin-bottom:10px; display:flex; justify-content:space-between;">
+      <div>${i+1}位 ${t.name}<br><span style="font-size:14px;">${t.m1} / ${t.m2} / ${t.m3}</span></div>
+      <div>${t.pt}pt</div></div>`; if(i<10) left+=block; else right+=block;
+  });
+  return `<div style="width:1920px; height:1080px; position:relative; color:white;">
+    <div style="position:absolute; inset:0; background:url('./Apexrankingback.png') center/cover no-repeat; filter: blur(6px);"></div>
+    <div style="position:absolute; inset:0; background:rgba(0,0,0,0.6);"></div>
+    <div style="position:absolute; top:100px; left:60px; right:60px; display:flex; gap:40px;">
+      <div style="width:50%">${left}</div><div style="width:50%">${right}</div>
+    </div></div>`;
+}
+function exportImage(){ syncInputs(); let arr;
+  if(rankingFinalized){ arr=state.teams.map(t=>({...t, pt:t.total||0})); }
+  else{ arr=state.teams.map(t=>({...t, pt:calc(t)})); }
+  arr.sort((a,b)=>b.pt-a.pt);
+  const wrap=document.createElement("div"); wrap.innerHTML=buildImageHTML(arr); document.body.appendChild(wrap);
+  html2canvas(wrap.firstElementChild,{scale:2}).then(canvas=>{ const a=document.createElement("a"); a.href=canvas.toDataURL(); a.download="ranking.png"; a.click(); wrap.remove(); });
+}
+
+// --- localStorage ---
+function saveData(){ localStorage.setItem("apexState", JSON.stringify(state)); }
+function loadData(){ const data=localStorage.getItem("apexState"); if(data){ state=JSON.parse(data); render(); updateRanking(); renderMatchHistory(); } }
+loadData();
+</script>
 </body>
 </html>
